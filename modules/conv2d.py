@@ -14,7 +14,13 @@ class Conv2D(Layer):
         
         # MODIFICAR: Añadir nuevo if-else para otros algoritmos de convolución
         if conv_algo == 0:
-            self.mode = 'direct' 
+            self.mode = 'direct'
+        elif conv_algo == 1:
+            self.mode = 'im2col'
+        elif conv_algo == 2:
+            self.mode = 'im2colGEMM'
+        elif conv_algo == 3:
+            self.mode = 'im2colfused'
         else:
             print(f"Algoritmo {conv_algo} no soportado aún")
             self.mode = 'direct' 
@@ -60,6 +66,12 @@ class Conv2D(Layer):
         # PISTA: Usar estos if-else si implementas más algoritmos de convolución
         if self.mode == 'direct':
             return self._forward_direct(input)
+        elif self.mode == 'im2col':
+            return self._forward_im2col(input)
+        elif self.mode == 'im2colGEMM':
+            return self._forward_im2colGEMM(input)
+        elif self.mode == 'im2colfused':
+            return self._forward_im2colfused(input)
         else:
             raise ValueError("Mode must be 'direct")
 
@@ -71,7 +83,6 @@ class Conv2D(Layer):
             raise ValueError("Mode must be 'direct' or 'im2col'")
 
     # --- DIRECT IMPLEMENTATION ---
-
     def _forward_direct(self, input):
         batch_size, _, in_h, in_w = input.shape
         k_h, k_w = self.kernel_size, self.kernel_size
@@ -135,5 +146,131 @@ class Conv2D(Layer):
         self.biases -= learning_rate * grad_biases
 
         return grad_input
+    
+    # --- INICIO BLOQUE GENERADO CON IA --- #
+
+    # --- La funcion im2col sirve para extraer cada patch de entrada para aplanar en un vector, convirtiendo en una fila
+    # --- y se almacena en una matriz para realizar el calculo posterior de la convolucion.
+    def _im2col(self, input):
+        batch_size, in_channels, in_h, in_w = input.shape
+        k_h, k_w = self.kernel_size, self.kernel_size
+
+        if self.padding > 0:
+            input = np.pad(
+                input,
+                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+                mode='constant'
+            ).astype(np.float32)
+
+        out_h = (input.shape[2] - k_h) // self.stride + 1
+        out_w = (input.shape[3] - k_w) // self.stride + 1
+
+        cols = np.zeros(
+            (batch_size, in_channels * k_h * k_w, out_h * out_w),
+            dtype=np.float32
+        )
+
+        for b in range(batch_size):
+            col_idx = 0
+            for i in range(out_h):
+                for j in range(out_w):
+                    patch = input[
+                        b,
+                        :,
+                        i * self.stride:i * self.stride + k_h,
+                        j * self.stride:j * self.stride + k_w
+                    ]
+                    cols[b, :, col_idx] = patch.reshape(-1)
+                    col_idx += 1
+
+        return cols, out_h, out_w
+
+    # --- im2col IMPLEMENTATION ---
+
+    # --- Esta funcion realiza la convolucion en modo im2col, ya que primero se obtiene
+    # --- los patches y los kernels aplanados en vector, una vez teniendo todo，se calcula la salida recorriendo cada patch y cada kernel
+    # --- en dentro de un bucle por cada iteración
+    def _forward_im2col(self, input):
+        batch_size = input.shape[0]
+
+        cols, out_h, out_w = self._im2col(input)
+        kernels_col = self.kernels.reshape(self.out_channels, -1).astype(np.float32)
+
+        output = np.zeros((batch_size, self.out_channels, out_h * out_w), dtype=np.float32)
+
+        for b in range(batch_size):
+            for pos in range(out_h * out_w):
+                patch_col = cols[b, :, pos]
+                for out_c in range(self.out_channels):
+                    output[b, out_c, pos] = np.sum(kernels_col[out_c] * patch_col) + self.biases[out_c]
+
+        output = output.reshape(batch_size, self.out_channels, out_h, out_w)
+        return output
+
+
+    # --- im2colGEMM IMPLEMENTATION ---
+
+    # --- Esta funcion realiza la convolucion en modo im2colGEMM, tambien primero se obtiene
+    # --- los patches y kernels aplanados en vector formando una matriz, y luego se calcula la salida mediante multiplicacion matricial entre los 
+    # --- patches y los kernels, de este modo el calculo matricial deberia ser mas rapido que el bucle for
+    def _forward_im2colGEMM(self, input):
+        batch_size = input.shape[0]
+
+        cols, out_h, out_w = self._im2col(input)
+
+        # (out_channels, in_channels * k_h * k_w)
+        kernels_col = self.kernels.reshape(self.out_channels, -1).astype(np.float32)
+
+        # (batch_size, out_channels, out_h * out_w)
+        output = np.zeros((batch_size, self.out_channels, out_h * out_w), dtype=np.float32)
+
+        for b in range(batch_size):
+            output[b] = kernels_col @ cols[b] + self.biases[:, None]
+
+        output = output.reshape(batch_size, self.out_channels, out_h, out_w)
+        return output
+
+
+    # --- im2colfused IMPLEMENTATION ---
+
+    # --- Esta funcion realiza la convolucion en modo im2colfused, en este modo，los kernels se vectoriza, y los patches se
+    # --- extrae, se aplanan y se pasan inmediatamente a realizar el calculo matricial sin formarse una matriz im2col completa.
+    def _forward_im2colfused(self, input):
+        batch_size, _, in_h, in_w = input.shape
+        k_h, k_w = self.kernel_size, self.kernel_size
+
+        if self.padding > 0:
+            input = np.pad(
+                input,
+                ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)),
+                mode='constant'
+            ).astype(np.float32)
+
+        out_h = (input.shape[2] - k_h) // self.stride + 1
+        out_w = (input.shape[3] - k_w) // self.stride + 1
+
+        kernels_col = self.kernels.reshape(self.out_channels, -1).astype(np.float32)
+
+        output = np.zeros((batch_size, self.out_channels, out_h * out_w), dtype=np.float32)
+
+        for b in range(batch_size):
+            for pos in range(out_h * out_w):
+                i = pos // out_w
+                j = pos % out_w
+
+                patch = input[
+                    b,
+                    :,
+                    i * self.stride:i * self.stride + k_h,
+                    j * self.stride:j * self.stride + k_w
+                ]
+
+                patch_col = patch.reshape(-1, 1).astype(np.float32)
+
+                output[b, :, pos:pos+1] = kernels_col @ patch_col + self.biases[:, None]
+
+        output = output.reshape(batch_size, self.out_channels, out_h, out_w)
+        return output
+    # --- FIN BLOQUE GENERADO CON IA --- #
 
     # PISTA: Se te ocurren otros algoritmos de convolución?

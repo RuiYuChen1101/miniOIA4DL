@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+cython_modules/build/
+cython_modules/*.c
+cython_modules/*.pyd
+data/cifar-100-python/

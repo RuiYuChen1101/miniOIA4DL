@@ -1,11 +1,9 @@
 #PISTA: es esta la mejor forma de hacer una matmul?
-def matmul_biasses(A, B, C, bias):
-    m, p, n = A.shape[0], A.shape[1], B.shape[1]
-    
-    for i in range(m):
-        for j in range(n):
-            for k in range(p):
-                C[i][j] += A[i][k] * B[k][j]
-            C[i][j] += bias[j]
-    return C
+import numpy as np
 
+# Aqui se calcula la salida de la capa Dense realizando la multiplicación entre la matriz
+# de entrada A y la matriz de pesos B, Después, añade el vector de sesgo bias a cada 
+# fila del resultado de forma vectorizada.
+def matmul_biasses(A, B, C, bias):
+    
+    return (A @ B + bias).astype(np.float32)
