@@ -2,6 +2,10 @@ import numpy as np
 cimport numpy as np
 
 # --- INICIO BLOQUE GENERADO CON IA --- #
+
+# --- Este bloque de codigo hace la misma funcion como la de maxpool2d.py, que tambien recorre por cada ventana de pooling de la entrada 
+# --- y calcula su valor máximo, los bucles esta implementado en cython para que ejecuta de una forma mas eficiente como la de C, en vez de python.
+
 def maxpool_forward_cython(np.ndarray[np.float32_t, ndim=4] input,
                            int kernel_size,
                            int stride):
